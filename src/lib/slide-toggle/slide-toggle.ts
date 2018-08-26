@@ -6,7 +6,8 @@
  * found in the LICENSE file at https://angular.io/license
  */
 
-import {FocusMonitor, FocusOrigin} from '@angular/cdk/a11y';
+import {FocusMonitor} from '@angular/cdk/a11y';
+import {Directionality} from '@angular/cdk/bidi';
 import {coerceBooleanProperty} from '@angular/cdk/coercion';
 import {Platform} from '@angular/cdk/platform';
 import {
@@ -34,12 +35,10 @@ import {
   CanDisableRipple,
   HammerInput,
   HasTabIndex,
-  MatRipple,
   mixinColor,
   mixinDisabled,
   mixinDisableRipple,
   mixinTabIndex,
-  RippleRef,
 } from '@angular/material/core';
 import {ANIMATION_MODULE_TYPE} from '@angular/platform-browser/animations';
 import {
@@ -102,9 +101,6 @@ export class MatSlideToggle extends _MatSlideToggleMixinBase implements OnDestro
   private _uniqueId: string = `mat-slide-toggle-${++nextUniqueId}`;
   private _required: boolean = false;
   private _checked: boolean = false;
-
-  /** Reference to the focus state ripple. */
-  private _focusRipple: RippleRef | null;
 
   /** Whether the thumb is currently being dragged. */
   private _dragging = false;
@@ -178,13 +174,10 @@ export class MatSlideToggle extends _MatSlideToggleMixinBase implements OnDestro
   /** Reference to the underlying input element. */
   @ViewChild('input') _inputElement: ElementRef;
 
-  /** Reference to the ripple directive on the thumb container. */
-  @ViewChild(MatRipple) _ripple: MatRipple;
-
   constructor(elementRef: ElementRef,
               /**
                * @deprecated The `_platform` parameter to be removed.
-               * @deletion-target 7.0.0
+               * @breaking-change 7.0.0
                */
               _platform: Platform,
               private _focusMonitor: FocusMonitor,
@@ -193,19 +186,29 @@ export class MatSlideToggle extends _MatSlideToggleMixinBase implements OnDestro
               private _ngZone: NgZone,
               @Inject(MAT_SLIDE_TOGGLE_DEFAULT_OPTIONS)
                   public defaults: MatSlideToggleDefaultOptions,
-              @Optional() @Inject(ANIMATION_MODULE_TYPE) public _animationMode?: string) {
+              @Optional() @Inject(ANIMATION_MODULE_TYPE) public _animationMode?: string,
+              @Optional() private _dir?: Directionality) {
     super(elementRef);
     this.tabIndex = parseInt(tabIndex) || 0;
   }
 
   ngAfterContentInit() {
     this._focusMonitor
-      .monitor(this._inputElement.nativeElement)
-      .subscribe(focusOrigin => this._onInputFocusChange(focusOrigin));
+      .monitor(this._elementRef, true)
+      .subscribe(focusOrigin => {
+        if (!focusOrigin) {
+          // When a focused element becomes disabled, the browser *immediately* fires a blur event.
+          // Angular does not expect events to be raised during change detection, so any state
+          // change (such as a form control's 'ng-touched') will cause a changed-after-checked
+          // error. See https://github.com/angular/angular/issues/17793. To work around this,
+          // we defer telling the form control it has been touched until the next tick.
+          Promise.resolve().then(() => this.onTouched());
+        }
+      });
   }
 
   ngOnDestroy() {
-    this._focusMonitor.stopMonitoring(this._inputElement.nativeElement);
+    this._focusMonitor.stopMonitoring(this._elementRef);
   }
 
   /** Method being called whenever the underlying input emits a change event. */
@@ -277,23 +280,7 @@ export class MatSlideToggle extends _MatSlideToggleMixinBase implements OnDestro
   /** Toggles the checked state of the slide-toggle. */
   toggle(): void {
     this.checked = !this.checked;
-  }
-
-  /** Function is called whenever the focus changes for the input element. */
-  private _onInputFocusChange(focusOrigin: FocusOrigin) {
-    // TODO(paul): support `program`. See https://github.com/angular/material2/issues/9889
-    if (!this._focusRipple && focusOrigin === 'keyboard') {
-      // For keyboard focus show a persistent ripple as focus indicator.
-      this._focusRipple = this._ripple.launch(0, 0, {persistent: true});
-    } else if (!focusOrigin) {
-      this.onTouched();
-
-      // Fade out and clear the focus ripple if one is currently present.
-      if (this._focusRipple) {
-        this._focusRipple.fadeOut();
-        this._focusRipple = null;
-      }
-    }
+    this.onChange(this.checked);
   }
 
   /**
@@ -329,9 +316,10 @@ export class MatSlideToggle extends _MatSlideToggleMixinBase implements OnDestro
 
   _onDrag(event: HammerInput) {
     if (this._dragging) {
-      this._dragPercentage = this._getDragPercentage(event.deltaX);
+      const direction = this._dir && this._dir.value === 'rtl' ? -1 : 1;
+      this._dragPercentage = this._getDragPercentage(event.deltaX * direction);
       // Calculate the moved distance based on the thumb bar width.
-      const dragX = (this._dragPercentage / 100) * this._thumbBarWidth;
+      const dragX = (this._dragPercentage / 100) * this._thumbBarWidth * direction;
       this._thumbEl.nativeElement.style.transform = `translate3d(${dragX}px, 0, 0)`;
     }
   }

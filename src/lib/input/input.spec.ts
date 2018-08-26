@@ -1,6 +1,11 @@
 import {Platform, PlatformModule} from '@angular/cdk/platform';
-import {createFakeEvent, dispatchFakeEvent, wrappedErrorMessage} from '@angular/cdk/testing';
-import {ChangeDetectionStrategy, Component, ViewChild, Type, Provider} from '@angular/core';
+import {
+  createFakeEvent,
+  dispatchFakeEvent,
+  wrappedErrorMessage,
+  MockNgZone,
+} from '@angular/cdk/testing';
+import {ChangeDetectionStrategy, Component, ViewChild, Type, Provider, NgZone} from '@angular/core';
 import {ComponentFixture, fakeAsync, flush, TestBed} from '@angular/core/testing';
 import {
   FormControl,
@@ -28,10 +33,10 @@ import {
 } from '@angular/material/form-field';
 import {By} from '@angular/platform-browser';
 import {BrowserAnimationsModule} from '@angular/platform-browser/animations';
-import {MatInputModule} from './index';
-import {MatInput} from './input';
 import {MatStepperModule} from '@angular/material/stepper';
 import {MatTabsModule} from '@angular/material/tabs';
+import {MatInputModule} from './index';
+import {MatInput} from './input';
 import {MatTextareaAutosize} from './autosize';
 
 describe('MatInput without forms', () => {
@@ -1127,6 +1132,78 @@ describe('MatInput with appearance', () => {
       expect(testComponent.formField.floatLabel).toBe('auto');
     }
   }));
+
+  it('should recalculate gaps when switching to outline appearance after init', fakeAsync(() => {
+    fixture.destroy();
+    TestBed.resetTestingModule();
+
+    const outlineFixture = createComponent(MatInputWithAppearanceAndLabel);
+
+    outlineFixture.detectChanges();
+    outlineFixture.componentInstance.appearance = 'legacy';
+    outlineFixture.detectChanges();
+    flush();
+
+    outlineFixture.componentInstance.appearance = 'outline';
+    outlineFixture.detectChanges();
+    flush();
+    outlineFixture.detectChanges();
+
+    const wrapperElement = outlineFixture.nativeElement;
+    const outlineStart = wrapperElement.querySelector('.mat-form-field-outline-start');
+    const outlineGap = wrapperElement.querySelector('.mat-form-field-outline-gap');
+
+    expect(parseInt(outlineStart.style.width)).toBeGreaterThan(0);
+    expect(parseInt(outlineGap.style.width)).toBeGreaterThan(0);
+  }));
+
+  it('should not set an outline gap if the label is empty', fakeAsync(() => {
+    fixture.destroy();
+    TestBed.resetTestingModule();
+
+    const outlineFixture = createComponent(MatInputWithAppearanceAndLabel);
+
+    outlineFixture.componentInstance.labelContent = '';
+    outlineFixture.detectChanges();
+    outlineFixture.componentInstance.appearance = 'outline';
+    outlineFixture.detectChanges();
+    flush();
+    outlineFixture.detectChanges();
+
+    const outlineGap = outlineFixture.nativeElement.querySelector('.mat-form-field-outline-gap');
+
+    expect(parseInt(outlineGap.style.width)).toBeFalsy();
+  }));
+
+  it('should calculate the gaps if the default appearance is provided through DI', fakeAsync(() => {
+    fixture.destroy();
+    TestBed.resetTestingModule();
+
+    let zone: MockNgZone;
+    const labelFixture = createComponent(MatInputWithLabel, [
+      {
+        provide: MAT_FORM_FIELD_DEFAULT_OPTIONS,
+        useValue: {appearance: 'outline'}
+      },
+      {
+        provide: NgZone,
+        useFactory: () => zone = new MockNgZone()
+      }
+    ]);
+
+    labelFixture.detectChanges();
+    zone!.simulateZoneExit();
+    flush();
+    labelFixture.detectChanges();
+
+    const wrapperElement = labelFixture.nativeElement;
+    const outlineStart = wrapperElement.querySelector('.mat-form-field-outline-start');
+    const outlineGap = wrapperElement.querySelector('.mat-form-field-outline-gap');
+
+    expect(parseInt(outlineStart.style.width)).toBeGreaterThan(0);
+    expect(parseInt(outlineGap.style.width)).toBeGreaterThan(0);
+  }));
+
 });
 
 describe('MatFormField default options', () => {
@@ -1545,6 +1622,16 @@ class MatInputWithReadonlyInput {}
 
 @Component({
   template: `
+    <mat-form-field>
+      <mat-label>Label</mat-label>
+      <input matInput>
+    </mat-form-field>
+  `
+})
+class MatInputWithLabel {}
+
+@Component({
+  template: `
     <mat-form-field [floatLabel]="floatLabel">
       <mat-label>Label</mat-label>
       <input matInput placeholder="Placeholder">
@@ -1565,6 +1652,19 @@ class MatInputWithLabelAndPlaceholder {
 class MatInputWithAppearance {
   @ViewChild(MatFormField) formField: MatFormField;
   appearance: MatFormFieldAppearance;
+}
+
+@Component({
+  template: `
+    <mat-form-field [appearance]="appearance">
+      <mat-label>{{labelContent}}</mat-label>
+      <input matInput>
+    </mat-form-field>
+  `
+})
+class MatInputWithAppearanceAndLabel {
+  appearance: MatFormFieldAppearance;
+  labelContent = 'Label';
 }
 
 @Component({

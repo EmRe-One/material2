@@ -141,14 +141,26 @@ export const MAT_FORM_FIELD_DEFAULT_OPTIONS =
 export class MatFormField extends _MatFormFieldMixinBase
     implements AfterContentInit, AfterContentChecked, AfterViewInit, CanColor {
   private _labelOptions: LabelOptions;
+  private _outlineGapCalculationNeeded = false;
 
   /** The form-field appearance style. */
   @Input()
-  get appearance(): MatFormFieldAppearance {
-    return this._appearance || this._defaultOptions && this._defaultOptions.appearance || 'legacy';
-  }
+  get appearance(): MatFormFieldAppearance { return this._appearance; }
   set appearance(value: MatFormFieldAppearance) {
-    this._appearance = value;
+    const oldValue = this._appearance;
+
+    this._appearance = value || (this._defaults && this._defaults.appearance) || 'legacy';
+
+    if (this._appearance === 'outline' && oldValue !== value) {
+      // @breaking-change 7.0.0 Remove this check and else block once _ngZone is required.
+      if (this._ngZone) {
+        this._ngZone!.onStable.pipe(take(1)).subscribe(() => {
+          this._ngZone!.runOutsideAngular(() => this.updateOutlineGap());
+        });
+      } else {
+        Promise.resolve().then(() => this.updateOutlineGap());
+      }
+    }
   }
   _appearance: MatFormFieldAppearance;
 
@@ -212,17 +224,13 @@ export class MatFormField extends _MatFormFieldMixinBase
   /** Whether the Angular animations are enabled. */
   _animationsEnabled: boolean;
 
-  _outlineGapWidth = 0;
-  _outlineGapStart = 0;
-  _initialGapCalculated = false;
-
   /**
    * @deprecated
-   * @deletion-target 7.0.0
+   * @breaking-change 7.0.0
    */
   @ViewChild('underline') underlineRef: ElementRef;
 
-  @ViewChild('connectionContainer') _connectionContainerRef: ElementRef;
+  @ViewChild('connectionContainer') _connectionContainerRef: ElementRef<HTMLElement>;
   @ViewChild('inputContainer') _inputContainerRef: ElementRef;
   @ViewChild('label') private _label: ElementRef;
   @ContentChild(MatFormFieldControl) _control: MatFormFieldControl<any>;
@@ -238,9 +246,9 @@ export class MatFormField extends _MatFormFieldMixinBase
       private _changeDetectorRef: ChangeDetectorRef,
       @Optional() @Inject(MAT_LABEL_GLOBAL_OPTIONS) labelOptions: LabelOptions,
       @Optional() private _dir: Directionality,
-      @Optional() @Inject(MAT_FORM_FIELD_DEFAULT_OPTIONS) private _defaultOptions:
-          MatFormFieldDefaultOptions,
-      // @deletion-target 7.0.0 _platform, _ngZone and _animationMode to be made required.
+      @Optional() @Inject(MAT_FORM_FIELD_DEFAULT_OPTIONS)
+          private _defaults: MatFormFieldDefaultOptions,
+      // @breaking-change 7.0.0 _platform, _ngZone and _animationMode to be made required.
       private _platform?: Platform,
       private _ngZone?: NgZone,
       @Optional() @Inject(ANIMATION_MODULE_TYPE) _animationMode?: string) {
@@ -249,6 +257,9 @@ export class MatFormField extends _MatFormFieldMixinBase
     this._labelOptions = labelOptions ? labelOptions : {};
     this.floatLabel = this._labelOptions.float || 'auto';
     this._animationsEnabled = _animationMode !== 'NoopAnimations';
+
+    // Set the default through here so we invoke the setter on the first run.
+    this.appearance = (_defaults && _defaults.appearance) ? _defaults.appearance : 'legacy';
   }
 
   /**
@@ -293,19 +304,8 @@ export class MatFormField extends _MatFormFieldMixinBase
 
   ngAfterContentChecked() {
     this._validateControlChild();
-
-    if (!this._initialGapCalculated) {
-      // @deletion-target 7.0.0 Remove this check and else block once _ngZone is required.
-      if (this._ngZone) {
-        // It's important that we run this outside the `_ngZone`, because the `Promise.resolve`
-        // can kick us into an infinite change detection loop, if the `_initialGapCalculated`
-        // wasn't flipped on for some reason.
-        this._ngZone.runOutsideAngular(() => {
-          Promise.resolve().then(() => this.updateOutlineGap());
-        });
-      } else {
-        Promise.resolve().then(() => this.updateOutlineGap());
-      }
+    if (this._outlineGapCalculationNeeded) {
+      this.updateOutlineGap();
     }
   }
 
@@ -417,9 +417,9 @@ export class MatFormField extends _MatFormFieldMixinBase
       let ids: string[] = [];
 
       if (this._getDisplayedMessages() === 'hint') {
-        let startHint = this._hintChildren ?
+        const startHint = this._hintChildren ?
             this._hintChildren.find(hint => hint.align === 'start') : null;
-        let endHint = this._hintChildren ?
+        const endHint = this._hintChildren ?
             this._hintChildren.find(hint => hint.align === 'end') : null;
 
         if (startHint) {
@@ -451,32 +451,51 @@ export class MatFormField extends _MatFormFieldMixinBase
    * appearance.
    */
   updateOutlineGap() {
-    if (this.appearance === 'outline' && this._label && this._label.nativeElement.children.length) {
-      if (this._platform && !this._platform.isBrowser) {
-        // getBoundingClientRect isn't available on the server.
-        this._initialGapCalculated = true;
-        return;
-      }
-      if (!document.documentElement.contains(this._elementRef.nativeElement)) {
-        return;
-      }
+    const labelEl = this._label ? this._label.nativeElement : null;
 
+    if (this.appearance !== 'outline' || !labelEl || !labelEl.children.length ||
+        !labelEl.textContent.trim()) {
+      return;
+    }
+
+    if (this._platform && !this._platform.isBrowser) {
+      // getBoundingClientRect isn't available on the server.
+      return;
+    }
+    // If the element is not present in the DOM, the outline gap will need to be calculated
+    // the next time it is checked and in the DOM.
+    if (!document.documentElement.contains(this._elementRef.nativeElement)) {
+      this._outlineGapCalculationNeeded = true;
+      return;
+    }
+
+    let startWidth = 0;
+    let gapWidth = 0;
+    const startEls = this._connectionContainerRef.nativeElement.querySelectorAll<HTMLElement>(
+      '.mat-form-field-outline-start');
+    const gapEls = this._connectionContainerRef.nativeElement.querySelectorAll<HTMLElement>(
+        '.mat-form-field-outline-gap');
+    if (this._label && this._label.nativeElement.children.length) {
       const containerStart = this._getStartEnd(
           this._connectionContainerRef.nativeElement.getBoundingClientRect());
-      const labelStart = this._getStartEnd(
-          this._label.nativeElement.children[0].getBoundingClientRect());
+      const labelStart = this._getStartEnd(labelEl.children[0].getBoundingClientRect());
       let labelWidth = 0;
-      for (const child of this._label.nativeElement.children) {
+
+      for (const child of labelEl.children) {
         labelWidth += child.offsetWidth;
       }
-      this._outlineGapStart = labelStart - containerStart - outlineGapPadding;
-      this._outlineGapWidth = labelWidth * floatingLabelScale + outlineGapPadding * 2;
-    } else {
-      this._outlineGapStart = 0;
-      this._outlineGapWidth = 0;
+      startWidth = labelStart - containerStart - outlineGapPadding;
+      gapWidth = labelWidth > 0 ? labelWidth * floatingLabelScale + outlineGapPadding * 2 : 0;
     }
-    this._initialGapCalculated = true;
-    this._changeDetectorRef.markForCheck();
+
+    for (let i = 0; i < startEls.length; i++) {
+      startEls.item(i).style.width = `${startWidth}px`;
+    }
+    for (let i = 0; i < gapEls.length; i++) {
+      gapEls.item(i).style.width = `${gapWidth}px`;
+    }
+
+    this._outlineGapCalculationNeeded = false;
   }
 
   /** Gets the start end of the rect considering the current directionality. */

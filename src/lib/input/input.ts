@@ -62,7 +62,7 @@ export const _MatInputMixinBase = mixinErrorState(MatInputBase);
   exportAs: 'matInput',
   host: {
     /**
-     * @deletion-target 7.0.0 remove .mat-form-field-autofill-control in favor of AutofillMonitor.
+     * @breaking-change 7.0.0 remove .mat-form-field-autofill-control in favor of AutofillMonitor.
      */
     'class': 'mat-input-element mat-form-field-autofill-control',
     '[class.mat-input-server]': '_isServer',
@@ -254,10 +254,12 @@ export class MatInput extends _MatInputMixinBase implements MatFormFieldControl<
   }
 
   ngOnInit() {
-    this._autofillMonitor.monitor(this._elementRef.nativeElement).subscribe(event => {
-      this.autofilled = event.isAutofilled;
-      this.stateChanges.next();
-    });
+    if (this._platform.isBrowser) {
+      this._autofillMonitor.monitor(this._elementRef.nativeElement).subscribe(event => {
+        this.autofilled = event.isAutofilled;
+        this.stateChanges.next();
+      });
+    }
   }
 
   ngOnChanges() {
@@ -266,7 +268,10 @@ export class MatInput extends _MatInputMixinBase implements MatFormFieldControl<
 
   ngOnDestroy() {
     this.stateChanges.complete();
-    this._autofillMonitor.stopMonitoring(this._elementRef.nativeElement);
+
+    if (this._platform.isBrowser) {
+      this._autofillMonitor.stopMonitoring(this._elementRef.nativeElement);
+    }
   }
 
   ngDoCheck() {

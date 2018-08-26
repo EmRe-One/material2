@@ -26,6 +26,7 @@ import {
   QueryList,
   ViewChild,
   ViewEncapsulation,
+  Attribute,
 } from '@angular/core';
 import {ControlValueAccessor, NG_VALUE_ACCESSOR} from '@angular/forms';
 import {
@@ -57,7 +58,7 @@ export const MAT_BUTTON_TOGGLE_GROUP_VALUE_ACCESSOR: any = {
 
 /**
  * @deprecated Use `MatButtonToggleGroup` instead.
- * @deletion-target 7.0.0
+ * @breaking-change 7.0.0
  */
 export class MatButtonToggleGroupMultiple {}
 
@@ -330,6 +331,8 @@ export const _MatButtonToggleMixinBase = mixinDisableRipple(MatButtonToggleBase)
     '[class.mat-button-toggle-checked]': 'checked',
     '[class.mat-button-toggle-disabled]': 'disabled',
     'class': 'mat-button-toggle',
+    // Clear out the native tabindex here since we forward it to the underlying button
+    '[attr.tabindex]': 'null',
     '[attr.id]': 'id',
   }
 })
@@ -370,6 +373,9 @@ export class MatButtonToggle extends _MatButtonToggleMixinBase implements OnInit
   /** MatButtonToggleGroup reads this to assign its own value. */
   @Input() value: any;
 
+  /** Tabindex for the toggle. */
+  @Input() tabIndex: number | null;
+
   /** Whether the button is checked. */
   @Input()
   get checked(): boolean {
@@ -404,9 +410,13 @@ export class MatButtonToggle extends _MatButtonToggleMixinBase implements OnInit
   constructor(@Optional() toggleGroup: MatButtonToggleGroup,
               private _changeDetectorRef: ChangeDetectorRef,
               private _elementRef: ElementRef<HTMLElement>,
-              private _focusMonitor: FocusMonitor) {
+              private _focusMonitor: FocusMonitor,
+              // @breaking-change 8.0.0 `defaultTabIndex` to be made a required parameter.
+              @Attribute('tabindex') defaultTabIndex: string) {
     super();
 
+    const parsedTabIndex = Number(defaultTabIndex);
+    this.tabIndex = (parsedTabIndex || parsedTabIndex === 0) ? parsedTabIndex : null;
     this.buttonToggleGroup = toggleGroup;
   }
 
@@ -423,11 +433,11 @@ export class MatButtonToggle extends _MatButtonToggleMixinBase implements OnInit
       this.checked = true;
     }
 
-    this._focusMonitor.monitor(this._elementRef.nativeElement, true);
+    this._focusMonitor.monitor(this._elementRef, true);
   }
 
   ngOnDestroy() {
-    this._focusMonitor.stopMonitoring(this._elementRef.nativeElement);
+    this._focusMonitor.stopMonitoring(this._elementRef);
   }
 
   /** Focuses the button. */
@@ -436,9 +446,7 @@ export class MatButtonToggle extends _MatButtonToggleMixinBase implements OnInit
   }
 
   /** Checks the button toggle due to an interaction with the underlying native button. */
-  _onButtonClick(event: Event) {
-    event.stopPropagation();
-
+  _onButtonClick() {
     const newChecked = this._isSingleSelector ? true : !this._checked;
 
     if (newChecked !== this._checked) {
@@ -447,10 +455,9 @@ export class MatButtonToggle extends _MatButtonToggleMixinBase implements OnInit
         this.buttonToggleGroup._syncButtonToggle(this, this._checked, true);
         this.buttonToggleGroup._onTouched();
       }
-
-      // Emit a change event when the native button does.
-      this.change.emit(new MatButtonToggleChange(this, this.value));
     }
+    // Emit a change event when it's the single selector
+    this.change.emit(new MatButtonToggleChange(this, this.value));
   }
 
   /**

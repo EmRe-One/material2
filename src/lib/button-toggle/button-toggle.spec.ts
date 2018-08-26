@@ -211,6 +211,7 @@ describe('MatButtonToggle without forms', () => {
         ButtonToggleWithAriaLabel,
         ButtonToggleWithAriaLabelledby,
         RepeatedButtonTogglesWithPreselectedValue,
+        ButtonToggleWithTabindex,
       ],
     });
 
@@ -345,9 +346,8 @@ describe('MatButtonToggle without forms', () => {
       fixture.detectChanges();
       tick();
 
-      // The default browser behavior is to not emit a change event, when the value was set
-      // to false. That's because the current input type is set to `radio`
-      expect(changeSpy).toHaveBeenCalledTimes(1);
+      // Always emit change event when button toggle is clicked
+      expect(changeSpy).toHaveBeenCalledTimes(2);
     }));
 
     it('should emit a change event from the button toggle group', fakeAsync(() => {
@@ -687,6 +687,26 @@ describe('MatButtonToggle without forms', () => {
     });
   });
 
+  describe('with tabindex ', () => {
+    it('should forward the tabindex to the underlying button', () => {
+      const fixture = TestBed.createComponent(ButtonToggleWithTabindex);
+      fixture.detectChanges();
+
+      const button = fixture.nativeElement.querySelector('.mat-button-toggle button');
+
+      expect(button.getAttribute('tabindex')).toBe('3');
+    });
+
+    it('should clear the tabindex from the host element', () => {
+      const fixture = TestBed.createComponent(ButtonToggleWithTabindex);
+      fixture.detectChanges();
+
+      const host = fixture.nativeElement.querySelector('.mat-button-toggle');
+
+      expect(host.hasAttribute('tabindex')).toBe(false);
+    });
+  });
+
   it('should not throw on init when toggles are repeated and there is an initial value', () => {
     const fixture = TestBed.createComponent(RepeatedButtonTogglesWithPreselectedValue);
 
@@ -856,3 +876,10 @@ class RepeatedButtonTogglesWithPreselectedValue {
   possibleValues = ['One', 'Two', 'Three'];
   value = 'Two';
 }
+
+
+@Component({
+  template: `<mat-button-toggle tabindex="3"></mat-button-toggle>`
+})
+class ButtonToggleWithTabindex {}
+
